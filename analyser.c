@@ -11,8 +11,33 @@ typedef struct packet{
     short number;
     u_char *pkt_data;
     short visited;
+    short type;                         //1 - Ethernet II, 2 - IEE 802.3 RAW/SNAP/LLC? waduhek
+    char source_address[12];
+    char destination_address[12];
+    char source_IP[16];
+    char destination_IP[16];
     int len;
 }PACKET;
+
+void help(){
+    printf("Network communication analyser by Juraj Bedej (C)\n");
+    printf("Assignment for PKS subject\n");
+    printf("<:help> to show help menu\n");
+    printf("<:exit> to quit the interactive console\n");
+    printf("<filename> to analyse .pcap file\n");
+    printf("Use the following switches in combination with .pcap file path:\n");
+    printf("\t <-HTTP> to filter all HTTP packets\n");
+    printf("\t <-HTTPS> to filter all HTTPS packets\n");
+    printf("\t <-TELNET> to filter all TELNET packets\n");
+    printf("\t <-SSH> to filter all SSH packets\n");
+    printf("\t <-FTPc> to filter all FTP Control packets\n");
+    printf("\t <-FTPd> to filter all FTP Data packets\n");
+    printf("\t <-TFTP> to filter all TFTP packets\n");
+    printf("\t <-ICMP> to filter all ICMP Data packets\n");
+    printf("\t <-ARP> to filter all ARP Data packets\n");
+    printf("Using no switch will result in printing of all packets\n");
+    printf("\nExample of usage: <filename> <-switch> <-switch>\n");
+}
 
 pcap_t *openPcap(char *file){
     char errbuf[PCAP_ERRBUF_SIZE];
@@ -31,11 +56,38 @@ int header_len(int len){                                                       /
         return len + 4;
 }
 
+char *stringifyType(PACKET packet){
+    if(packet.type == 1)
+        return "Ethernet II";
+    else if(packet.type == 2)
+        return "IEE 802.3 LLC + SNAP";
+    else if(packet.type == 3)
+        return "IEE 802.3 RAW";
+    else
+        return "IEE 802.3 LLC";
+}
+
+void printAddress(FILE *f, char *address){
+    int i = 0;
+    for(i = 0; i < 12; i++){
+        if(i % 2 == 0 && i != 0){
+            fprintf(f, " ");
+        }
+        fprintf(f,"%X", address[i]);
+    }
+    fprintf(f, "\n");
+}
+
 void printAnalysis(FILE *f, PACKET packet){
     int i;
     fprintf(f, "rámec %d\n", packet.number);
     fprintf(f, "dĺžka rámca poskytnutá pcap API - %d B\n", packet.len);
     fprintf(f, "dĺžka rámca prenášaného po médiu - %d B\n", header_len(packet.len));
+    fprintf(f, "%s\n", stringifyType(packet));
+    fprintf(f, "Zdrojová MAC adresa: ");
+    printAddress(f, packet.source_address);
+    fprintf(f, "Cieľová MAC adresa: ");
+    printAddress(f, packet.destination_address);
     for(i = 0; i < packet.len; i++){
         if(i % line_length == 0 && i != 0)
             fprintf(f,"\n");
@@ -67,8 +119,43 @@ PACKET *init(pcap_t *f, PACKET *packets, int *count){
     return packets;
 }
 
+PACKET *setType(PACKET *packets, int count){
+    int i;
+    for(i = 0; i < count; i++){
+        if(packets[i].pkt_data[12] > 5 || (packets[i].pkt_data[12] == 5 && packets[i].pkt_data[13] > 208))
+            packets[i].type = 1;        //Ethernet II
+        else if(packets[i].pkt_data[14] == 170 && packets[i].pkt_data[15] == 170)
+            packets[i].type = 2;        //IEE 802.3 LLC + SNAP
+        else if(packets[i].pkt_data[14] == 255 && packets[i].pkt_data[15] == 255)
+            packets[i].type = 3;        //IEE 802.3 RAW
+        else
+            packets[i].type = 4;        //IEE 802.3 LLC
+    }
+    return packets;
+}
+
+
+PACKET *setAddress(PACKET *packets, int count){
+    int i, j;
+    for(i = 0; i < count; i++){
+        for(j = 0; j < packets[i].len; j++){
+            if(j < 6){
+                packets[i].destination_address[j * 2] = packets[i].pkt_data[j]/16;
+                packets[i].destination_address[j * 2 + 1] = packets[i].pkt_data[j]%16;
+            }
+            if(j >= 6 && j < 12){
+                packets[i].source_address[(j - 6) * 2] = packets[i].pkt_data[j]/16;
+                packets[i].source_address[(j - 6) * 2 + 1] = packets[i].pkt_data[j]%16;
+            }
+        }
+    }
+    return packets;
+}
+
 void analysePcap(PACKET *packets, int count){
     FILE *o = fopen("output.txt", "w");
+    packets = setAddress(packets, count);
+    packets = setType(packets, count);
     int i;
     for(i = 0; i < count; i++){
         printAnalysis(o, packets[i]);
@@ -94,26 +181,6 @@ void handleSwitches(char *filename){
     PACKET *packets = malloc(sizeof(PACKET));
     packets = init(f, packets, &count);
     analysePcap(packets, count);
-}
-
-void help(){
-    printf("Network communication analyser by Juraj Bedej (C)\n");
-    printf("Assignment for PKS subject\n");
-    printf("<:help> to show help menu\n");
-    printf("<:exit> to quit the interactive console\n");
-    printf("<filename> to analyse .pcap file\n");
-    printf("Use the following switches in combination with .pcap file path:\n");
-    printf("\t <-HTTP> to filter all HTTP packets\n");
-    printf("\t <-HTTPS> to filter all HTTPS packets\n");
-    printf("\t <-TELNET> to filter all TELNET packets\n");
-    printf("\t <-SSH> to filter all SSH packets\n");
-    printf("\t <-FTPc> to filter all FTP Control packets\n");
-    printf("\t <-FTPd> to filter all FTP Data packets\n");
-    printf("\t <-TFTP> to filter all TFTP packets\n");
-    printf("\t <-ICMP> to filter all ICMP Data packets\n");
-    printf("\t <-ARP> to filter all ARP Data packets\n");
-    printf("Using no switch will result in printing of all packets\n");
-    printf("\nExample of usage: <filename> <-switch> <-switch>\n");
 }
 
 int prompt(char *filename){
