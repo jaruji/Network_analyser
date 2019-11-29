@@ -7,17 +7,27 @@
 #define line_length 16
 #define gap 8
 
+//idea :void pointer in packet, will always point to lower type of protocol - so packet -> ethernet II -> tcp -> http for example
+
 typedef struct packet{
-    short number;
+    int number;
     u_char *pkt_data;
     short visited;
     short type;                         //1 - Ethernet II, 2 - IEE 802.3 RAW/SNAP/LLC? waduhek
     char source_address[12];
     char destination_address[12];
-    char source_IP[16];
-    char destination_IP[16];
+    char protocol[10];
     int len;
 }PACKET;
+
+typedef struct ethernet{                //extension for ethernet II packets
+    PACKET *packet;                     //extension points to core packet
+    char source_IP[16];
+    char destination_IP[16];
+    char protocol[10];
+    int destination_port;
+    int source_port;
+}ETHERNET;
 
 void help(){
     printf("Network communication analyser by Juraj Bedej (C)\n");
@@ -102,7 +112,7 @@ PACKET *init(pcap_t *f, PACKET *packets, int *count){
     struct pcap_pkthdr *pkt_header;
     const u_char *pkt_data;
     int i = 0, j;
-    printf("Analysing .pcap file...");
+    printf("Analysing .pcap file... ");
     while(pcap_next_ex(f,&pkt_header,&pkt_data) > 0){
         packets = realloc(packets, (i + 1) * sizeof(PACKET));
         packets[i].pkt_data = malloc(pkt_header -> caplen * sizeof(u_char));
@@ -119,6 +129,19 @@ PACKET *init(pcap_t *f, PACKET *packets, int *count){
     return packets;
 }
 
+ETHERNET *initEthernet(PACKET *packets, ETHERNET *ethernet, int count){
+    int i, j = 0;
+    for(i = 0; i < count; i++){
+        if(packets[i].type == 1){
+            ethernet = realloc(ethernet, (j + 1) * sizeof(ETHERNET));
+            ethernet[j].packet = &packets[i];
+            j++;
+        }
+    }
+    printf(".pcap file contains %d Ethernet II packets\n", j);
+    return ethernet;
+}
+
 PACKET *setType(PACKET *packets, int count){
     int i;
     for(i = 0; i < count; i++){
@@ -133,7 +156,6 @@ PACKET *setType(PACKET *packets, int count){
     }
     return packets;
 }
-
 
 PACKET *setAddress(PACKET *packets, int count){
     int i, j;
@@ -152,16 +174,27 @@ PACKET *setAddress(PACKET *packets, int count){
     return packets;
 }
 
+PACKET *setProtocol(PACKET *packets, int count){
+    int i;
+    for(i = 0; i < count; i++){
+
+    }
+    return packets;
+}
+
 void analysePcap(PACKET *packets, int count){
     FILE *o = fopen("output.txt", "w");
     packets = setAddress(packets, count);
     packets = setType(packets, count);
+    ETHERNET *ethernet = malloc(sizeof(ETHERNET));
+    ethernet = initEthernet(packets, ethernet, count);
     int i;
     for(i = 0; i < count; i++){
         printAnalysis(o, packets[i]);
     }
     printf("Analysis stored to: %s\n", _fullpath(NULL, "output.txt", FILENAME));
     fclose(o);
+    free(ethernet);
 }
 
 void handleSwitches(char *filename){
@@ -181,6 +214,7 @@ void handleSwitches(char *filename){
     PACKET *packets = malloc(sizeof(PACKET));
     packets = init(f, packets, &count);
     analysePcap(packets, count);
+    free(packets);
 }
 
 int prompt(char *filename){
